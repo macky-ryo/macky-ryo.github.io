@@ -39,6 +39,9 @@ const loadSampleButton = document.getElementById("loadSampleButton");
 let activeTab = "text";
 let latestResult = null;
 
+// 競合解消後も初期表示時の動作を安定させるため、空結果を先に描画
+renderResult(Object.fromEntries(FIELD_DEFINITIONS.map((f) => [f.key, FALLBACK_TEXT])));
+
 tabs.forEach((tab) => {
   tab.addEventListener("click", () => switchTab(tab.dataset.tab));
 });
