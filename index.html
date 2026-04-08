@@ -8,17 +8,39 @@
   </head>
   <body>
     <main class="app">
-      <h1>求人票抽出デモ</h1>
-      <p class="lead">求人票テキストを貼り付けて「抽出する」を押すと、見出しごとに整理して表示します。</p>
-      <p class="sample-link"><a href="sample.txt" target="_blank" rel="noopener noreferrer">sample.txt（サンプル求人票）を開く</a></p>
+      <h1>求人票抽出デモ（実務向けプロトタイプ）</h1>
+      <p class="lead">テキスト貼り付け / PDFアップロード / 求人URL から求人情報を整理して表示します。</p>
 
-      <label for="jobText" class="label">求人票テキスト</label>
-      <textarea id="jobText" placeholder="ここに求人票テキストを貼り付けてください"></textarea>
+      <div class="tabs" role="tablist" aria-label="入力方法">
+        <button class="tab active" data-tab="text" type="button">テキスト貼り付け</button>
+        <button class="tab" data-tab="pdf" type="button">PDFアップロード</button>
+        <button class="tab" data-tab="url" type="button">求人URL入力</button>
+      </div>
+
+      <section id="pane-text" class="pane active">
+        <label for="jobText" class="label">求人票テキスト</label>
+        <textarea id="jobText" placeholder="ここに求人票テキストを貼り付けてください"></textarea>
+      </section>
+
+      <section id="pane-pdf" class="pane">
+        <label for="pdfFile" class="label">PDFファイル</label>
+        <input id="pdfFile" type="file" accept="application/pdf" />
+        <p class="hint">※ ブラウザ上で読み取り可能なPDFのみ対応。画像PDFは抽出できない場合があります。</p>
+      </section>
+
+      <section id="pane-url" class="pane">
+        <label for="jobUrl" class="label">求人URL</label>
+        <input id="jobUrl" type="url" placeholder="https://example.com/job/123" />
+        <p class="hint">※ 取得制限があるサイトでは本文取得に失敗するため、その場合は本文を貼り付けてください。</p>
+      </section>
 
       <div class="button-row">
         <button id="extractButton" type="button">抽出する</button>
         <button id="copyButton" type="button" class="sub">結果をコピーする</button>
+        <button id="loadSampleButton" type="button" class="sub">sample.txt を読み込む</button>
       </div>
+
+      <p id="errorArea" class="error" aria-live="polite"></p>
 
       <section class="result" aria-live="polite">
         <h2>抽出結果</h2>
