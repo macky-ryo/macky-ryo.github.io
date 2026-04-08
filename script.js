@@ -1,4 +1,8 @@
 const FALLBACK_TEXT = "詳しくは面談時にお問合せください。";
+const HEADING_CANDIDATES = [
+  "事業所名", "職種", "雇用形態", "契約期間", "応募資格", "仕事内容", "仕事内容の変更の範囲",
+  "給与", "勤務時間", "時間外労働", "休日", "休日・休暇", "待遇", "試用期間", "受動喫煙対策",
+];
 
 const FIELD_DEFINITIONS = [
   { key: "officeName", label: "事業所名", headings: ["事業所名", "会社名", "法人名"] },
@@ -26,15 +30,13 @@ const FIELD_DEFINITIONS = [
 
 const tabs = [...document.querySelectorAll(".tab")];
 const panes = [...document.querySelectorAll(".pane")];
-
-if (tabs.length === 0 || panes.length === 0) {
-  console.warn("タブ要素が見つかりません。HTML構造を確認してください。");
-}
 const jobText = document.getElementById("jobText");
 const pdfFile = document.getElementById("pdfFile");
 const jobUrl = document.getElementById("jobUrl");
 const errorArea = document.getElementById("errorArea");
 const resultArea = document.getElementById("resultArea");
+const rawTextPreview = document.getElementById("rawTextPreview");
+const cleanTextPreview = document.getElementById("cleanTextPreview");
 
 const extractButton = document.getElementById("extractButton");
 const copyButton = document.getElementById("copyButton");
@@ -43,21 +45,22 @@ const loadSampleButton = document.getElementById("loadSampleButton");
 let activeTab = "text";
 let latestResult = null;
 
-// 競合解消後も初期表示時の動作を安定させるため、空結果を先に描画
 renderResult(Object.fromEntries(FIELD_DEFINITIONS.map((f) => [f.key, FALLBACK_TEXT])));
 
-tabs.forEach((tab) => {
-  tab.addEventListener("click", () => switchTab(tab.dataset.tab));
-});
+tabs.forEach((tab) => tab.addEventListener("click", () => switchTab(tab.dataset.tab)));
 
 extractButton.addEventListener("click", async () => {
   setError("");
-  const sourceText = await collectInputText();
-  if (!sourceText) {
+  const { text: raw, sourceType } = await collectInputText();
+  if (!raw) {
     setError("入力データが見つかりません。テキスト貼り付け、PDF、URLのいずれかを入力してください。");
     return;
   }
-  const data = buildExtractedData(normalizeText(sourceText));
+
+  const preprocessed = preprocessText(raw, sourceType);
+  updateDebugPreview(raw, preprocessed);
+
+  const data = buildExtractedData(preprocessed);
   latestResult = data;
   renderResult(data);
 });
@@ -67,19 +70,17 @@ copyButton.addEventListener("click", async () => {
     setError("先に抽出を実行してください。");
     return;
   }
-  const text = toCopyText(latestResult);
-  const copied = await copyToClipboard(text);
+  const copied = await copyToClipboard(toCopyText(latestResult));
   setError(copied ? "抽出結果をコピーしました。" : "コピーに失敗しました。手動でコピーしてください。");
 });
 
 loadSampleButton.addEventListener("click", async () => {
-  setError("");
   try {
     const res = await fetch("sample.txt");
-    if (!res.ok) throw new Error("sample read failed");
+    if (!res.ok) throw new Error();
     jobText.value = await res.text();
     switchTab("text");
-  } catch (e) {
+  } catch {
     setError("sample.txt の読み込みに失敗しました。ファイルを直接開いて貼り付けてください。");
   }
 });
@@ -91,19 +92,17 @@ function switchTab(tabName) {
 }
 
 async function collectInputText() {
-  if (activeTab === "text") {
-    return jobText.value.trim();
-  }
+  if (activeTab === "text") return { text: jobText.value.trim(), sourceType: "text" };
   if (activeTab === "pdf") {
-    if (!pdfFile.files[0]) return "";
-    return extractTextFromPdf(pdfFile.files[0]);
+    if (!pdfFile.files[0]) return { text: "", sourceType: "pdf" };
+    return { text: await extractTextFromPdf(pdfFile.files[0]), sourceType: "pdf" };
   }
   if (activeTab === "url") {
     const url = jobUrl.value.trim();
-    if (!url) return "";
-    return fetchTextFromUrl(url);
+    if (!url) return { text: "", sourceType: "url" };
+    return { text: await fetchTextFromUrl(url), sourceType: "url" };
   }
-  return "";
+  return { text: "", sourceType: "text" };
 }
 
 async function extractTextFromPdf(file) {
@@ -118,7 +117,7 @@ async function extractTextFromPdf(file) {
       text += `${content.items.map((item) => item.str).join(" ")}\n`;
     }
     return text;
-  } catch (e) {
+  } catch {
     setError("PDFの読み取りに失敗しました。画像PDFや保護PDFの場合、本文を貼り付けてください。");
     return "";
   }
@@ -136,21 +135,75 @@ async function fetchTextFromUrl(url) {
   try {
     const proxy = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, "")}`;
     const res = await fetch(proxy);
-    if (!res.ok) throw new Error("fetch failed");
+    if (!res.ok) throw new Error();
     return await res.text();
-  } catch (e) {
+  } catch {
     setError("URLから本文を取得できませんでした。取得制限があるサイトのため、本文を貼り付けてください。");
     return "";
   }
 }
 
+function preprocessText(text, sourceType) {
+  let normalized = (text || "").replace(/\r\n/g, "\n");
+  normalized = normalized.replace(/<br\s*\/?\s*>/gi, "\n");
+
+  if (sourceType === "url") {
+    normalized = normalized
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&");
+  }
+
+  const noisePatterns = [
+    /^title\s*[:：]/i,
+    /^id\s*[:：]/i,
+    /投稿日[:：]?/,
+    /更新日[:：]?/,
+    /copyright/i,
+    /^https?:\/\//i,
+    /^<[^>]+>$/,
+    /^\s*[-_=]{3,}\s*$/,
+  ];
+
+  normalized = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !noisePatterns.some((pattern) => pattern.test(line)))
+    .join("\n");
+
+  normalized = insertBreakBeforeHeadings(normalized);
+
+  if (sourceType === "pdf") {
+    normalized = normalized.replace(/[ \t]{2,}/g, " ");
+  }
+
+  normalized = normalized
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[\u3000\t]+/g, " ")
+    .replace(/[ ]{2,}/g, " ")
+    .trim();
+
+  return normalized;
+}
+
+function insertBreakBeforeHeadings(text) {
+  let result = text;
+  HEADING_CANDIDATES.forEach((heading) => {
+    const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`(?!^)(\\s*)(${escaped})(\\s*[：:])`, "g"), "\n$2$3");
+  });
+  return result;
+}
+
+function updateDebugPreview(raw, cleaned) {
+  rawTextPreview.value = raw;
+  cleanTextPreview.value = cleaned;
+}
+
 function buildExtractedData(text) {
   const data = {};
-
-  // 将来拡張メモ:
-  // - Python/API化では collectInputText と buildExtractedData を分離したままAPI I/Oへ置換しやすい。
-  // - LLM連携時は、見出し抽出→欠損補完→フォーマット整形（給与）を段階実行するのが安全。
-
   data.catchCopy = generateCatchCopy(text);
   const features = generateFeatures(text);
   data.feature1 = features[0];
@@ -167,10 +220,6 @@ function buildExtractedData(text) {
   return data;
 }
 
-function normalizeText(text) {
-  return (text || "").replace(/\r\n/g, "\n").trim();
-}
-
 function generateCatchCopy(text) {
   const seed = extractByHeadings(text, ["仕事内容", "職種", "事業所名"]) || firstInformativeLine(text);
   return trimToRange(`働きやすさと成長を両立できる注目求人: ${seed}`, 20, 120);
@@ -179,13 +228,9 @@ function generateCatchCopy(text) {
 function generateFeatures(text) {
   const candidates = [
     extractByHeadings(text, ["職種"]),
-    extractByHeadings(text, ["勤務地", "勤務時間"]),
+    extractByHeadings(text, ["勤務時間", "休日", "休日・休暇"]),
     extractByHeadings(text, ["給与", "待遇", "福利厚生"]),
-    "未経験からでも挑戦可",
-    "働き方の相談がしやすい",
-    "福利厚生が充実",
   ].filter(Boolean);
-
   const uniq = [...new Set(candidates.map((v) => trimToMax(v, 20)))];
   return [uniq[0] || FALLBACK_TEXT, uniq[1] || FALLBACK_TEXT, uniq[2] || FALLBACK_TEXT];
 }
@@ -197,21 +242,14 @@ function generateBodySummary(text) {
 
 function collectCompanyLikeLines(text) {
   const keywords = ["当社", "弊社", "事業", "会社", "企業", "理念", "サービス", "運営", "設立"];
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length >= 10 && keywords.some((kw) => line.includes(kw)))
-    .join(" ");
+  return text.split("\n").map((line) => line.trim()).filter((line) => line.length >= 10 && keywords.some((kw) => line.includes(kw))).join(" ");
 }
 
 function formatSalary(text) {
-  const isJikyu = /(時給)/.test(text);
-  if (isJikyu) {
-    const jikyu = extractMoneyRange(text, ["時給"]);
-    return `【時給】${jikyu}`;
+  if (/時給/.test(text)) {
+    return `【時給】${extractMoneyRange(text, ["時給"])}`;
   }
-
-  const lines = [
+  return [
     `【月給】${extractMoneyRange(text, ["月給", "給与"])}`,
     "",
     "【内訳】",
@@ -225,19 +263,15 @@ function formatSalary(text) {
     "",
     `昇給あり（前年度実績：${extractTextAround(text, ["昇給"], 30)}）`,
     `賞与年◯回（計${extractTextAround(text, ["賞与"], 30)}）`,
-  ];
-
-  return lines.join("\n");
+  ].join("\n");
 }
 
 function extractMoneyRange(text, heads) {
-  const line = extractByHeadings(text, heads);
-  const found = line || findLineContains(text, heads);
-  if (!found) return FALLBACK_TEXT;
-
-  const matches = found.match(/[0-9,]+\s*円/g);
-  if (matches && matches.length >= 2) return `${normalizeMoney(matches[0])}〜${normalizeMoney(matches[1])}`;
-  if (matches && matches.length === 1) return normalizeMoney(matches[0]);
+  const line = extractByHeadings(text, heads) || findLineContains(text, heads);
+  if (!line) return FALLBACK_TEXT;
+  const matches = line.match(/[0-9,]+\s*円/g);
+  if (matches?.length >= 2) return `${normalizeMoney(matches[0])}〜${normalizeMoney(matches[1])}`;
+  if (matches?.length === 1) return normalizeMoney(matches[0]);
   return FALLBACK_TEXT;
 }
 
@@ -247,23 +281,25 @@ function normalizeMoney(raw) {
 
 function extractTextAround(text, heads, length) {
   const line = extractByHeadings(text, heads) || findLineContains(text, heads);
-  if (!line) return FALLBACK_TEXT;
-  return trimToMax(line, length);
+  return line ? trimToMax(line, length) : FALLBACK_TEXT;
 }
 
 function findLineContains(text, heads) {
-  const lines = text.split("\n").map((v) => v.trim());
-  return lines.find((line) => heads.some((h) => line.includes(h))) || "";
+  return text.split("\n").map((v) => v.trim()).find((line) => heads.some((h) => line.includes(h))) || "";
 }
 
 function extractByHeadings(text, headings = []) {
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i].trim();
-    const heading = headings.find((h) => line.startsWith(h));
-    if (!heading) continue;
+    const rawLine = lines[i].trim();
+    const line = normalizeLineForMatch(rawLine);
+    const heading = headings.find((h) => {
+      const hNorm = normalizeLineForMatch(h);
+      return line.startsWith(hNorm) || line.includes(`${hNorm}:`) || new RegExp(`(^|\\s)${escapeRegExp(hNorm)}\\s*[:：]`).test(line);
+    });
 
-    const direct = extractInlineValue(line, heading);
+    if (!heading) continue;
+    const direct = extractInlineValue(rawLine, heading);
     if (direct) return direct;
 
     const block = [];
@@ -279,13 +315,23 @@ function extractByHeadings(text, headings = []) {
 }
 
 function extractInlineValue(line, heading) {
-  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return line.replace(new RegExp(`^${escaped}[：:\\s-]*`), "").trim();
+  const h = escapeRegExp(heading);
+  const regex = new RegExp(`^\\s*${h}\\s*[：:]?\\s*`);
+  return line.replace(regex, "").trim();
 }
 
 function isAnyHeadingLine(line) {
-  const allHeadings = FIELD_DEFINITIONS.flatMap((f) => f.headings || []);
-  return allHeadings.some((h) => line.startsWith(h));
+  const normalized = normalizeLineForMatch(line);
+  const all = FIELD_DEFINITIONS.flatMap((f) => f.headings || []).map((h) => normalizeLineForMatch(h));
+  return all.some((h) => normalized.startsWith(h));
+}
+
+function normalizeLineForMatch(value) {
+  return (value || "").replace(/[\u3000\t]/g, " ").replace(/[：]/g, ":").replace(/\s+/g, "").toLowerCase();
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function firstInformativeLine(text) {
@@ -313,13 +359,10 @@ function renderResult(data) {
   FIELD_DEFINITIONS.forEach((field) => {
     const item = document.createElement("article");
     item.className = "result-item";
-
     const title = document.createElement("h3");
     title.textContent = field.label;
-
     const value = document.createElement("p");
     value.textContent = data[field.key] || FALLBACK_TEXT;
-
     item.append(title, value);
     list.appendChild(item);
   });
@@ -344,7 +387,7 @@ async function copyToClipboard(text) {
   document.body.appendChild(temp);
   temp.select();
   let ok = false;
-  try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+  try { ok = document.execCommand("copy"); } catch { ok = false; }
   document.body.removeChild(temp);
   return ok;
 }

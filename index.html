@@ -42,6 +42,14 @@
 
       <p id="errorArea" class="error" aria-live="polite"></p>
 
+      <details class="debug-panel">
+        <summary>デバッグ表示（生テキスト / 前処理後テキスト）</summary>
+        <label for="rawTextPreview" class="label">生テキストを表示</label>
+        <textarea id="rawTextPreview" readonly></textarea>
+        <label for="cleanTextPreview" class="label">前処理後テキストを表示</label>
+        <textarea id="cleanTextPreview" readonly></textarea>
+      </details>
+
       <section class="result" aria-live="polite">
         <h2>抽出結果</h2>
         <div id="resultArea"></div>
