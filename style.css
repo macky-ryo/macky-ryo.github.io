@@ -31,7 +31,8 @@ h1 { margin: 0 0 8px; }
 
 textarea,
 input[type="url"],
-input[type="file"] {
+input[type="file"],
+input[type="text"] {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -59,6 +60,7 @@ button.sub:hover { background: #374151; }
 }
 .debug-panel summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 .debug-panel textarea { min-height: 120px; margin-bottom: 10px; background: #f9fafb; }
+.debug-panel input { margin-bottom: 10px; background: #f9fafb; }
 
 .result { margin-top: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .result h2 { margin-top: 0; }

@@ -44,10 +44,14 @@
 
       <details class="debug-panel">
         <summary>デバッグ表示（生テキスト / 前処理後テキスト）</summary>
+        <label for="mediaTypePreview" class="label">媒体判定結果</label>
+        <input id="mediaTypePreview" type="text" readonly />
         <label for="rawTextPreview" class="label">生テキストを表示</label>
         <textarea id="rawTextPreview" readonly></textarea>
         <label for="cleanTextPreview" class="label">前処理後テキストを表示</label>
         <textarea id="cleanTextPreview" readonly></textarea>
+        <label for="sectionPreview" class="label">セクション分割結果</label>
+        <textarea id="sectionPreview" readonly></textarea>
       </details>
 
       <section class="result" aria-live="polite">
